@@ -90,7 +90,7 @@ src/
 6. **Access the application**:
    - API: http://localhost:3000
    - Swagger Docs: http://localhost:3000/docs
-   - Health Check: http://localhost:3000/health
+
 
 ## 🔑 Environment Variables
 
