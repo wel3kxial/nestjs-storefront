@@ -1,0 +1,425 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MERCHANT
+  CUSTOMER
+}
+
+enum ProductType {
+  DIGITAL
+  OFFLINE_SERVICE
+  ONLINE_CONSULTING
+}
+
+enum BillingType {
+  ONE_TIME
+  HOURLY
+  SESSION
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING
+  PAID
+  FULFILLED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum FulfillmentType {
+  DIGITAL
+  BOOKING
+  CONSULTING
+}
+
+enum ReservationStatus {
+  HELD
+  CONFIRMED
+  CANCELLED
+}
+
+enum StockLedgerReason {
+  HOLD
+  COMMIT
+  RELEASE
+  REFUND
+}
+
+enum ResourceType {
+  STUDIO
+  COURT
+  ROOM
+  COACH
+  CONSULTANT
+}
+
+enum PolicyType {
+  REFUND
+  CANCELLATION
+}
+
+enum RefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  firstName String?
+  lastName  String?
+  role      UserRole @default(CUSTOMER)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  merchantProducts Product[]   @relation("MerchantProducts")
+  orders           Order[]
+  carts            Cart[]
+  reservations     Reservation[]
+  auditLogs        AuditLog[]
+
+  @@index([email])
+  @@map("users")
+}
+
+model Product {
+  id                  String      @id @default(cuid())
+  type                ProductType
+  title               String
+  description         String?
+  status              String      @default("ACTIVE")
+  merchantId          String
+  refundPolicyId      String?
+  cancellationPolicyId String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  // Relations
+  merchant          User           @relation("MerchantProducts", fields: [merchantId], references: [id])
+  refundPolicy      Policy?        @relation("ProductRefundPolicy", fields: [refundPolicyId], references: [id])
+  cancellationPolicy Policy?       @relation("ProductCancellationPolicy", fields: [cancellationPolicyId], references: [id])
+  prices            Price[]
+  stockItems        StockItem[]
+  cartItems         CartItem[]
+  orderItems        OrderItem[]
+  resources         Resource[]
+
+  @@index([merchantId])
+  @@index([type])
+  @@map("products")
+}
+
+model Price {
+  id         String      @id @default(cuid())
+  productId  String
+  currency   String      @default("usd")
+  unitAmount Int
+  billing    BillingType @default(ONE_TIME)
+  active     Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  // Relations
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  @@map("prices")
+}
+
+model StockItem {
+  id           String  @id @default(cuid())
+  productId    String
+  sku          String? @unique
+  quantity     Int     @default(0)
+  holdQuantity Int     @default(0)
+  managed      Boolean @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  product     Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  stockLedger StockLedger[]
+
+  @@map("stock_items")
+}
+
+model StockLedger {
+  id          String            @id @default(cuid())
+  stockItemId String
+  change      Int
+  reason      StockLedgerReason
+  orderId     String?
+  createdAt   DateTime          @default(now())
+
+  // Relations
+  stockItem StockItem @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+  order     Order?    @relation(fields: [orderId], references: [id])
+
+  @@map("stock_ledger")
+}
+
+model Cart {
+  id        String   @id @default(cuid())
+  customerId String
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  customer  User       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  productId String
+  priceId   String
+  quantity  Int      @default(1)
+  slotId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  cart     Cart      @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product  Product   @relation(fields: [productId], references: [id])
+  price    Price     @relation(fields: [priceId], references: [id])
+  timeSlot TimeSlot? @relation(fields: [slotId], references: [id])
+
+  @@map("cart_items")
+}
+
+model Order {
+  id                    String      @id @default(cuid())
+  customerId            String
+  status                OrderStatus @default(DRAFT)
+  totalAmount           Int
+  currency              String      @default("usd")
+  stripeCheckoutSessionId String?   @unique
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  // Relations
+  customer      User              @relation(fields: [customerId], references: [id])
+  items         OrderItem[]
+  payments      Payment[]
+  refunds       Refund[]
+  stockLedger   StockLedger[]
+  fulfillments  Fulfillment[]
+
+  @@index([customerId])
+  @@index([status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id             String          @id @default(cuid())
+  orderId        String
+  productId      String
+  priceId        String
+  quantity       Int             @default(1)
+  unitAmount     Int
+  totalAmount    Int
+  fulfillmentType FulfillmentType
+  reservationId  String?         @unique
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  // Relations
+  order            Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product          Product            @relation(fields: [productId], references: [id])
+  price            Price              @relation(fields: [priceId], references: [id])
+  reservation      Reservation?       @relation(fields: [reservationId], references: [id])
+  digitalEntitlement DigitalEntitlement[]
+  refunds          Refund[]
+
+  @@map("order_items")
+}
+
+model Payment {
+  id                     String        @id @default(cuid())
+  orderId                String
+  stripePaymentIntentId  String        @unique
+  amount                 Int
+  currency               String        @default("usd")
+  status                 PaymentStatus @default(PENDING)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  // Relations
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([stripePaymentIntentId])
+  @@map("payments")
+}
+
+model Refund {
+  id            String       @id @default(cuid())
+  orderId       String
+  orderItemId   String?
+  reason        String
+  amount        Int
+  currency      String       @default("usd")
+  stripeRefundId String?     @unique
+  status        RefundStatus @default(PENDING)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  // Relations
+  order     Order     @relation(fields: [orderId], references: [id])
+  orderItem OrderItem? @relation(fields: [orderItemId], references: [id])
+
+  @@map("refunds")
+}
+
+model DigitalEntitlement {
+  id            String    @id @default(cuid())
+  orderItemId   String
+  licenseKey    String?   @unique
+  fileUrl       String?
+  downloadUrl   String?
+  expiresAt     DateTime?
+  downloadCount Int       @default(0)
+  maxDownloads  Int?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id])
+
+  @@map("digital_entitlements")
+}
+
+model Resource {
+  id         String       @id @default(cuid())
+  type       ResourceType
+  name       String
+  productId  String?
+  calendarId String?
+  capacity   Int          @default(1)
+  isActive   Boolean      @default(true)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  // Relations
+  product   Product?   @relation(fields: [productId], references: [id])
+  timeSlots TimeSlot[]
+
+  @@map("resources")
+}
+
+model TimeSlot {
+  id         String   @id @default(cuid())
+  resourceId String
+  startsAt   DateTime
+  endsAt     DateTime
+  capacity   Int      @default(1)
+  reserved   Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  resource     Resource      @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  reservations Reservation[]
+  cartItems    CartItem[]
+
+  @@unique([resourceId, startsAt, endsAt])
+  @@index([startsAt])
+  @@map("time_slots")
+}
+
+model Reservation {
+  id          String            @id @default(cuid())
+  timeSlotId  String
+  customerId  String
+  status      ReservationStatus @default(HELD)
+  expiresAt   DateTime?
+  confirmedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  // Relations
+  timeSlot  TimeSlot   @relation(fields: [timeSlotId], references: [id])
+  customer  User       @relation(fields: [customerId], references: [id])
+  orderItem OrderItem?
+
+  @@index([customerId])
+  @@index([status])
+  @@map("reservations")
+}
+
+model Policy {
+  id        String     @id @default(cuid())
+  type      PolicyType
+  name      String
+  jsonRules Json
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  // Relations
+  productsRefund       Product[] @relation("ProductRefundPolicy")
+  productsCancellation Product[] @relation("ProductCancellationPolicy")
+
+  @@map("policies")
+}
+
+model Fulfillment {
+  id          String   @id @default(cuid())
+  orderId     String
+  type        String
+  status      String   @default("PENDING")
+  metadata    Json?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@map("fulfillments")
+}
+
+model AuditLog {
+  id       String   @id @default(cuid())
+  actorId  String?
+  entity   String
+  entityId String
+  action   String
+  before   Json?
+  after    Json?
+  createdAt DateTime @default(now())
+
+  // Relations
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
+

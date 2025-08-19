@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/opt/homebrew/opt/postgresql@14/bin/createdb:*)",
+      "Bash(npm init:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
